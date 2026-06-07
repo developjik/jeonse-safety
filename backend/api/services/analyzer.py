@@ -42,6 +42,12 @@ def generate_guidance(items: list[RiskItem], overall_status: str) -> list[str]:
             guidance.append(f"전세가율이 높습니다. 주변 시세와 비교하여 전세금이 적정한지 확인하세요.")
         if item.category == "building" and item.status == "danger":
             guidance.append(f"건물 정보에 문제가 있습니다. 건축물대장을 직접 확인하세요.")
+        if item.category == "insurance" and item.status in ("caution", "danger"):
+            guidance.append("해당 지역의 전세보증금 사고 발생률이 높습니다. HUG 전세금 반환보증보험 가입을 권장합니다.")
+        if item.category == "registry" and item.status in ("caution", "danger"):
+            guidance.append("근저당/가등기 정보에 주의가 필요합니다. 등기부등본을 직접 확인하세요.")
+        if item.category == "contract_mismatch" and item.status == "danger":
+            guidance.append("갑/을 목적물이 일치하지 않습니다. 다운계약서 가능성이 있으니 전문가 상담을 권장합니다.")
 
     if all(i.status == "safe" for i in items if i.status != "unavailable"):
         guidance.append("✅ 검사 항목에서 특이사항이 발견되지 않았습니다. 다만 본 결과는 참고용이며, 계약 전 전문가 상담을 권장합니다.")
@@ -51,9 +57,8 @@ def generate_guidance(items: list[RiskItem], overall_status: str) -> list[str]:
     return guidance
 
 
-def analyze(request: AnalyzeRequest, jeonse_ratio_item: RiskItem, building_item: RiskItem) -> AnalyzeResponse:
+def analyze(request: AnalyzeRequest, items: list[RiskItem]) -> AnalyzeResponse:
     """전체 위험 분석 실행"""
-    items = [jeonse_ratio_item, building_item]
 
     overall_status = determine_overall_status(items)
     guidance = generate_guidance(items, overall_status)

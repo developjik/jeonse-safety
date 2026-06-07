@@ -1,4 +1,5 @@
 """국토교통부 공공데이터포털 API 연동 — 실거래가 + 건축물대장"""
+import asyncio
 import os
 import httpx
 import xmltodict
@@ -11,7 +12,51 @@ MOLIT_BASE_URL = "https://apis.data.go.kr/1613000"
 SERVICE_KEY = os.environ.get("MOLIT_SERVICE_KEY_DECODED", "")
 
 
-async def fetch_apt_trade_avg(sigungu_code: str, months: int = 6) -> float | None:
+async def _fetch_month_trade(client: httpx.AsyncClient, sem: asyncio.Semaphore, sigungu_code: str, yyyymm: str, area_sqm: float | None = None, building_name: str | None = None) -> list[float]:
+    """Single month fetch for trade avg."""
+    async with sem:
+        url = f"{MOLIT_BASE_URL}/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev"
+        params = {
+            "serviceKey": SERVICE_KEY,
+            "LAWD_CD": sigungu_code[:5] if len(sigungu_code) >= 5 else sigungu_code,
+            "DEAL_YMD": yyyymm,
+            "numOfRows": "100",
+        }
+        try:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = xmltodict.parse(resp.text)
+            items = data.get("response", {}).get("body", {}).get("items", {})
+            result_items = []
+            if items:
+                item_list = items.get("item", [])
+                if isinstance(item_list, dict):
+                    item_list = [item_list]
+                for item in item_list:
+                    # Building name filter (1st priority)
+                    if building_name:
+                        apt_nm = item.get('aptNm', item.get('아파트', ''))
+                        if apt_nm and building_name not in apt_nm and apt_nm not in building_name:
+                            continue
+                    # Area filter
+                    if area_sqm:
+                        try:
+                            area = float(item.get('excluUseAr', item.get('전용면적', '0')))
+                            if abs(area - area_sqm) > 10:
+                                continue
+                        except ValueError:
+                            pass
+                    amount_str = item.get("dealAmount", item.get("거래금액", "0")).replace(",", "").strip()
+                    try:
+                        result_items.append(float(amount_str))
+                    except ValueError:
+                        continue
+            return result_items
+        except Exception:
+            return []
+
+
+async def fetch_apt_trade_avg(sigungu_code: str, months: int = 6, area_sqm: float | None = None, building_name: str | None = None) -> float | None:
     """
     국토교통부 아파트 실거래가 API에서 최근 N개월 평균 거래가 조회.
     반환: 평균 거래가 (만원 단위) 또는 None
@@ -20,92 +65,84 @@ async def fetch_apt_trade_avg(sigungu_code: str, months: int = 6) -> float | Non
         return None
 
     now = datetime.now()
-    total_amount = 0.0
-    total_count = 0
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    sem = asyncio.Semaphore(3)
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        tasks = []
         for i in range(months):
             month_date = datetime(now.year, now.month - i, 1) if now.month > i else datetime(now.year - 1, 12 - (i - now.month), 1)
             yyyymm = month_date.strftime("%Y%m")
+            tasks.append(_fetch_month_trade(client, sem, sigungu_code, yyyymm, area_sqm, building_name))
+        results = await asyncio.gather(*tasks)
 
-            url = f"{MOLIT_BASE_URL}/RTMSDataSvcAptTradeDev/getRTMSDataSvcAptTradeDev"
-            params = {
-                "serviceKey": SERVICE_KEY,
-                "LAWD_CD": sigungu_code[:5] if len(sigungu_code) >= 5 else sigungu_code,
-                "DEAL_YMD": yyyymm,
-                "numOfRows": "100",
-            }
-
-            try:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = xmltodict.parse(resp.text)
-
-                items = data.get("response", {}).get("body", {}).get("items", {})
-                if items:
-                    item_list = items.get("item", [])
-                    if isinstance(item_list, dict):
-                        item_list = [item_list]
-                    for item in item_list:
-                        amount_str = item.get("dealAmount", item.get("거래금액", "0")).replace(",", "").strip()
-                        try:
-                            total_amount += float(amount_str)
-                            total_count += 1
-                        except ValueError:
-                            continue
-            except Exception:
-                continue
-
-    if total_count == 0:
+    amounts = [a for batch in results for a in batch]
+    if not amounts:
         return None
-    return total_amount / total_count
+    return sum(amounts) / len(amounts)
 
 
-async def fetch_jeonse_trade_avg(sigungu_code: str, months: int = 6) -> float | None:
+async def _fetch_month_jeonse(client: httpx.AsyncClient, sem: asyncio.Semaphore, sigungu_code: str, yyyymm: str, area_sqm: float | None = None, building_name: str | None = None) -> list[float]:
+    """Single month fetch for jeonse avg."""
+    async with sem:
+        url = f"{MOLIT_BASE_URL}/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
+        params = {
+            "serviceKey": SERVICE_KEY,
+            "LAWD_CD": sigungu_code[:5] if len(sigungu_code) >= 5 else sigungu_code,
+            "DEAL_YMD": yyyymm,
+            "numOfRows": "100",
+        }
+        try:
+            resp = await client.get(url, params=params)
+            resp.raise_for_status()
+            data = xmltodict.parse(resp.text)
+            items = data.get("response", {}).get("body", {}).get("items", {})
+            result_items = []
+            if items:
+                item_list = items.get("item", [])
+                if isinstance(item_list, dict):
+                    item_list = [item_list]
+                for item in item_list:
+                    # Building name filter (1st priority)
+                    if building_name:
+                        apt_nm = item.get('aptNm', item.get('아파트', ''))
+                        if apt_nm and building_name not in apt_nm and apt_nm not in building_name:
+                            continue
+                    # Area filter
+                    if area_sqm:
+                        try:
+                            area = float(item.get('excluUseAr', item.get('전용면적', '0')))
+                            if abs(area - area_sqm) > 10:
+                                continue
+                        except ValueError:
+                            pass
+                    amount_str = item.get("deposit", item.get("보증금액", "0")).replace(",", "").strip()
+                    try:
+                        result_items.append(float(amount_str))
+                    except ValueError:
+                        continue
+            return result_items
+        except Exception:
+            return []
+
+
+async def fetch_jeonse_trade_avg(sigungu_code: str, months: int = 6, area_sqm: float | None = None, building_name: str | None = None) -> float | None:
     """전세 실거래가 평균 조회"""
     if not SERVICE_KEY:
         return None
 
     now = datetime.now()
-    total_amount = 0.0
-    total_count = 0
-
-    async with httpx.AsyncClient(timeout=10.0) as client:
+    sem = asyncio.Semaphore(3)
+    async with httpx.AsyncClient(timeout=3.0) as client:
+        tasks = []
         for i in range(months):
             month_date = datetime(now.year, now.month - i, 1) if now.month > i else datetime(now.year - 1, 12 - (i - now.month), 1)
             yyyymm = month_date.strftime("%Y%m")
+            tasks.append(_fetch_month_jeonse(client, sem, sigungu_code, yyyymm, area_sqm, building_name))
+        results = await asyncio.gather(*tasks)
 
-            url = f"{MOLIT_BASE_URL}/RTMSDataSvcAptRent/getRTMSDataSvcAptRent"
-            params = {
-                "serviceKey": SERVICE_KEY,
-                "LAWD_CD": sigungu_code[:5] if len(sigungu_code) >= 5 else sigungu_code,
-                "DEAL_YMD": yyyymm,
-                "numOfRows": "100",
-            }
-
-            try:
-                resp = await client.get(url, params=params)
-                resp.raise_for_status()
-                data = xmltodict.parse(resp.text)
-
-                items = data.get("response", {}).get("body", {}).get("items", {})
-                if items:
-                    item_list = items.get("item", [])
-                    if isinstance(item_list, dict):
-                        item_list = [item_list]
-                    for item in item_list:
-                        amount_str = item.get("deposit", item.get("보증금액", "0")).replace(",", "").strip()
-                        try:
-                            total_amount += float(amount_str)
-                            total_count += 1
-                        except ValueError:
-                            continue
-            except Exception:
-                continue
-
-    if total_count == 0:
+    amounts = [a for batch in results for a in batch]
+    if not amounts:
         return None
-    return total_amount / total_count
+    return sum(amounts) / len(amounts)
 
 
 async def evaluate_jeonse_ratio(request: AnalyzeRequest) -> RiskItem:
@@ -114,7 +151,11 @@ async def evaluate_jeonse_ratio(request: AnalyzeRequest) -> RiskItem:
         request.rental_type, request.deposit, request.monthly_rent
     )
 
-    market_avg = await fetch_apt_trade_avg(request.sigungu_code)
+    market_avg, region_avg_data = await asyncio.gather(
+        fetch_apt_trade_avg(request.sigungu_code, area_sqm=request.area_sqm, building_name=request.building_name or None),
+        fetch_jeonse_trade_avg(request.sigungu_code, area_sqm=request.area_sqm, building_name=request.building_name or None),
+    )
+    region_avg = region_avg_data
 
     if market_avg is None or market_avg == 0:
         return RiskItem(
@@ -130,7 +171,6 @@ async def evaluate_jeonse_ratio(request: AnalyzeRequest) -> RiskItem:
     ratio = (effective_deposit / market_avg) * 100
 
     # 지역 평균 전세가율
-    region_avg = await fetch_jeonse_trade_avg(request.sigungu_code)
     region_avg_pct = (region_avg / market_avg * 100) if region_avg and market_avg else None
 
     if ratio < 70:
@@ -148,6 +188,10 @@ async def evaluate_jeonse_ratio(request: AnalyzeRequest) -> RiskItem:
         f"시세 추정: {market_avg:.0f}만원",
         f"환산보증금: {effective_deposit:,}만원",
     ]
+    if request.area_sqm:
+        detail_parts.append(f'전용면적: {request.area_sqm}㎡ 기준 (±10㎡)')
+    else:
+        detail_parts.append('시군구 전체 평균 기준')
     if region_avg_pct:
         detail_parts.append(f"지역 평균 전세가율: {region_avg_pct:.1f}%")
 
@@ -254,6 +298,18 @@ async def evaluate_building(request: AnalyzeRequest) -> RiskItem:
     ugrnd_floors = item.get("ugrndFlrCnt", "")
     use_apr = item.get("useAprDay", "")
     arch_area = item.get("archArea", "")
+    # 건물 노후도 계산
+    building_age = None
+    if use_apr and len(use_apr) >= 8:
+        try:
+            apr_year = int(use_apr[:4])
+            building_age = datetime.now().year - apr_year
+        except ValueError:
+            pass
+
+    # 내진 설계 여부 (향후 활용)
+    _seismic_yn = item.get('strctCdNm', '')
+
 
     detail_parts = []
     if bld_nm:
@@ -266,8 +322,15 @@ async def evaluate_building(request: AnalyzeRequest) -> RiskItem:
         detail_parts.append(f"층수: 지상{grnd_floors}층" + (f"/지하{ugrnd_floors}층" if ugrnd_floors else ""))
     if arch_area:
         detail_parts.append(f"건축면적: {arch_area}㎡")
-    if use_apr:
-        detail_parts.append(f"사용승인일: {use_apr}")
+    if building_age is not None:
+        detail_parts.append(f"준공년도: {use_apr[:4]}년 ({building_age}년됨)")
+    if building_age is not None:
+        if building_age >= 30:
+            detail_parts.append("노후도: 위험 (30년 이상)")
+        elif building_age >= 20:
+            detail_parts.append("노후도: 주의 (20-30년)")
+        else:
+            detail_parts.append("노후도: 양호 (20년 미만)")
 
     if is_violation:
         detail_parts.append("위반 건축물: 예")
@@ -277,6 +340,17 @@ async def evaluate_building(request: AnalyzeRequest) -> RiskItem:
             status="danger",
             value="위반 건축물",
             interpretation="위반 건축물로 등록된 건물입니다.",
+            detail=" | ".join(detail_parts),
+        )
+
+    # 노후도 판정 (위반 건축물이 아닐 때)
+    if building_age is not None and building_age >= 30:
+        return RiskItem(
+            category="building",
+            label="건축물대장",
+            status="danger",
+            value=f"{building_age}년 노후",
+            interpretation=f"준공 {building_age}년으로 노후 건물입니다.",
             detail=" | ".join(detail_parts),
         )
 

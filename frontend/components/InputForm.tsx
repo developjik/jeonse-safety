@@ -24,6 +24,7 @@ export default function InputForm() {
   const [rentalType, setRentalType] = useState<RentalType>("jeonse");
   const [deposit, setDeposit] = useState("");
   const [monthlyRent, setMonthlyRent] = useState("");
+  const [areaSqM, setAreaSqM] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -53,6 +54,7 @@ export default function InputForm() {
         rental_type: rentalType,
         deposit: Number(deposit),
         monthly_rent: rentalType === "wolse" ? Number(monthlyRent) : null,
+        area_sqm: areaSqM ? parseFloat(areaSqM) : undefined,
       });
 
       // 결과를 sessionStorage에 저장하고 결과 페이지로 이동
@@ -179,10 +181,39 @@ export default function InputForm() {
         </div>
       </div>
 
+      {/* Step 3.5: 평수 입력 (선택) */}
+      <div>
+        <label className='mb-2 block text-sm font-semibold text-gray-700'>
+          4️⃣ 전용면적 (선택)
+        </label>
+        <div className='flex gap-2'>
+          <div className='relative flex-1'>
+            <input
+              type='text'
+              inputMode='numeric'
+              value={areaSqM ? formatNumber(areaSqM) : ''}
+              onChange={(e) => setAreaSqM(e.target.value.replace(/[^0-9.]/g, ''))}
+              placeholder='제곱미터 (㎡)'
+              className='w-full rounded-lg border border-gray-300 p-3 pr-12 text-right text-lg focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-200'
+            />
+            <span className='absolute right-3 top-1/2 -translate-y-1/2 text-sm text-gray-400'>㎡</span>
+          </div>
+        </div>
+        <p className='mt-1 text-xs text-gray-400'>입력하면 해당 평수대 시세로 정확한 전세가율을 계산합니다</p>
+      </div>
+
       {/* 에러 메시지 */}
       {error && (
         <div className="rounded-lg bg-red-50 p-3 text-sm text-red-600">
-          {error}
+          <p>{error}</p>
+          <button
+            type="button"
+            onClick={(e) => handleSubmit(e as unknown as React.FormEvent)}
+            disabled={loading}
+            className="mt-2 rounded-md bg-red-100 px-3 py-1 text-xs font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
+          >
+            🔄 다시 시도
+          </button>
         </div>
       )}
 

@@ -5,7 +5,7 @@ load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.routes import analyze, health
+from api.routes import analyze, health, results
 
 app = FastAPI(title="전세안심 API", version="0.1.0")
 
@@ -19,3 +19,4 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api", tags=["health"])
 app.include_router(analyze.router, prefix="/api", tags=["analyze"])
+app.include_router(results.router, prefix="/api", tags=["results"])

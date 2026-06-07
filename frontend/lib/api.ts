@@ -12,7 +12,18 @@ export async function analyzeProperty(
   });
 
   if (!res.ok) {
-    throw new Error(`분석 요청 실패: ${res.status}`);
+    let message = `분석 요청 실패: ${res.status}`;
+    try {
+      const body = await res.json();
+      if (body.detail) {
+        message = body.detail;
+      } else if (body.message) {
+        message = body.message;
+      }
+    } catch {
+      // JSON 파싱 실패 시 기본 메시지 사용
+    }
+    throw new Error(message);
   }
 
   return res.json();

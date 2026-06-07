@@ -21,8 +21,10 @@ export interface AnalyzeRequest {
   rental_type: RentalType;
   deposit: number;
   monthly_rent?: number | null;
+  area_sqm?: number | null;
+  contract_gab?: string[] | null;
+  contract_eul?: string[] | null;
 }
-
 export interface RiskItem {
   category: string;
   label: string;

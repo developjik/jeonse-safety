@@ -13,10 +13,13 @@ class AnalyzeRequest(BaseModel):
     rental_type: Literal["jeonse", "wolse"] = Field(..., description="전세/월세 구분")
     deposit: int = Field(..., description="보증금 (만원 단위)")
     monthly_rent: int | None = Field(default=None, description="월세 (만원 단위, wolse인 경우)")
+    area_sqm: float | None = Field(default=None, description="전용면적 (㎡)")
+    contract_gab: list[str] | None = Field(default=None, description="갑 목적물 목록")
+    contract_eul: list[str] | None = Field(default=None, description="을 목적물 목록")
 
 
 class RiskItem(BaseModel):
-    category: str = Field(..., description="검사 항목: jeonse_ratio | building | insurance")
+    category: Literal["jeonse_ratio", "building", "insurance", "registry", "contract_mismatch"] = Field(..., description="검사 항목")
     label: str = Field(..., description="항목명 (한국어)")
     status: Literal["safe", "caution", "danger", "unavailable"] = Field(..., description="판정")
     value: str = Field(..., description="수치 (예: 87.5%)")
